@@ -18,7 +18,7 @@ public:
     // Returns false (and does not insert) if the queue has been closed.
     bool push(T value) {
         std::unique_lock lock(mux_);
-        cv_.wait(lock, [this] { return size_locked() != capacity_ || shut_down_; } );
+        cv_push_.wait(lock, [this] { return size_locked() != capacity_ || shut_down_; } );
 
         if (shut_down_) {
             return false;
@@ -26,7 +26,7 @@ public:
 
         buf_[head_ % capacity_] = std::move(value);
         head_++;
-        cv_.notify_all();
+        cv_pop_.notify_one();
 
         return true;
     }
@@ -35,7 +35,7 @@ public:
     // Returns the next item, or std::nullopt once the queue is closed AND empty.
     std::optional<T> pop() {
         std::unique_lock lock(mux_);
-        cv_.wait(lock, [this] { return size_locked() != 0 || shut_down_; } );
+        cv_pop_.wait(lock, [this] { return size_locked() != 0 || shut_down_; } );
 
         if (size_locked() == 0) {
             return std::nullopt;
@@ -43,7 +43,7 @@ public:
 
         T elem = std::move(buf_[tail_ % capacity_]);
         tail_++;
-        cv_.notify_all();
+        cv_push_.notify_one();
 
         return elem;
     }
@@ -56,7 +56,8 @@ public:
             shut_down_ = true;
         }
 
-        cv_.notify_all();
+        cv_push_.notify_all();
+        cv_pop_.notify_all();
     }
 
     std::size_t size() const {
@@ -68,7 +69,7 @@ private:
     std::vector<T> buf_;
 
     mutable std::mutex mux_;
-    std::condition_variable cv_;
+    std::condition_variable cv_push_, cv_pop_;
 
     std::size_t head_{0};
     std::size_t tail_{0};
